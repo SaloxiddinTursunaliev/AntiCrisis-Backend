@@ -1,0 +1,28 @@
+from django.urls import path
+from .auth.sign_up import signup
+from .auth.sign_in import signin
+from .auth.sign_out import signout
+from .feeds.feeds import get_feeds
+from .discount.discount import discount
+from .search.search import search_businesses
+from .search.search_by_id import get_business_by_id
+from .profile.profile import get_profile
+from .profile.profile_settings.profile_edit import profile_edit
+from .profile.profile_settings.business_details_edit import business_details_edit
+from .profile.add_post import profile_posts
+from .profile.follow import follow_user
+
+urlpatterns = [
+    path('signup/', signup, name='signup'),
+    path('signin/', signin, name='signin'),
+    path('signout/', signout, name='signout'),
+    path('feeds/', get_feeds, name='get_feeds'),
+    path('discount/', discount, name='discount'),
+    path('search/', search_businesses, name='search_businesses'),
+    path('business/<int:business_id>/', get_business_by_id, name='get_business_by_id'),
+    path('profile/edit/', profile_edit, name='profile_edit'),
+    path('profile/edit/business_details/', business_details_edit, name='business_details_edit'),
+    path('profile/<str:username>/posts/', profile_posts, name='profile_posts'),
+    path('profile/<str:username>/', get_profile, name='get-profile'),
+    path('profile/<str:username>/follow/', follow_user, name='follow_user'),  # Follow user
+]
