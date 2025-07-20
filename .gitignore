@@ -1,0 +1,4 @@
+venv/
+anticrisis/db.sqlite3
+
+# to add .gitignore file give command in git bash "touch .gitignore"
