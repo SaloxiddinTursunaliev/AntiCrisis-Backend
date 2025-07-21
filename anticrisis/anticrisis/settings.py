@@ -28,7 +28,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
-CSRF_TRUSTED_ORIGINS = ['https://app.ilmsoft.uz']
+CSRF_TRUSTED_ORIGINS = ['https://anticrisis-backend.onrender.com']
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -37,6 +37,7 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
 #   "https://example.com",
 #   "https://sub.example.com",
+    "http://0.0.0.0:8000",
     "http://localhost:8000",
     "http://localhost:8080",
     "http://192.168.1.100:8000",  # Add your machine's IP
