@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.authtoken.models import Token
-from ..models2 import BusinessProfile
+from ..models2 import Profile
 from rest_framework.permissions import AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import login
@@ -25,8 +25,8 @@ class UserSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
 
-        # Create the BusinessProfile instance
-        BusinessProfile.objects.create(user=user, business_name=business_name)
+        # Create the Profile instance
+        Profile.objects.create(user=user, business_name=business_name)
         
         return user
 

@@ -1,9 +1,9 @@
 from rest_framework import serializers
-from ..models2 import BusinessProfile
+from ..models2 import Profile
 
-class BusinessProfileSearchSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source='user.username')  # Assuming user is a ForeignKey in BusinessProfile
+class ProfileSearchSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username')  # Assuming user is a ForeignKey in Profile
 
     class Meta:
-        model = BusinessProfile
-        fields = ['id', 'business_name', 'avatar_picture', 'about', 'username']
+        model = Profile
+        fields = ['id', 'business_name', 'avatar_url', 'about', 'username']

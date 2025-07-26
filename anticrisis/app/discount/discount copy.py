@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework import serializers
-from ..models2 import Discount, BusinessProfile
+from ..models2 import Discount, Profile
 from django.shortcuts import get_object_or_404
 
 class DiscountSerializer(serializers.ModelSerializer):
@@ -37,14 +37,14 @@ def discount(request):
         # Handle creating a discount
         try:
             issuer = request.user.business_profile
-        except BusinessProfile.DoesNotExist:
+        except Profile.DoesNotExist:
             return Response({'error': 'Business profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
         recipient_user_id = request.data.get('recipient')
         if not recipient_user_id:
             return Response({'error': 'Recipient user ID is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        recipient_profile = get_object_or_404(BusinessProfile, user_id=recipient_user_id)
+        recipient_profile = get_object_or_404(Profile, user_id=recipient_user_id)
 
         data = {
             'recipient': recipient_profile.id,

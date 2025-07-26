@@ -1,72 +1,86 @@
-# views.py
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.models import User
-from ..models2 import BusinessProfile, BusinessType, BusinessProfileType, Discount, Follow
-from .serializers import UserProfileSerializer, BusinessTypeSerializer
-from django.db.models import Avg
+from ..models2 import Profile, UserBusinessType, Follow
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_profile(request, username):
-    try:
-        # Retrieve user by ID
-        user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+    """
+    Returns a user's business profile along with business types and follow status.
+    Optimized for minimal DB load and fast serialization.
+    """
+    viewer_user = request.user
 
     try:
-        # Retrieve the business profile associated with the user
-        business_profile = BusinessProfile.objects.get(user=user)
-    except BusinessProfile.DoesNotExist:
-        return Response({'error': 'Business profile not found'}, status=status.HTTP_404_NOT_FOUND)
+        # Optimized user + profile join
+        user = User.objects.select_related('profile').only(
+            'id', 'username',
+            'profile__id', 'profile__user_id',
+            'profile__business_name', 'profile__avatar_url',
+            'profile__banner_url', 'profile__followers_count',
+            'profile__followings_count', 'profile__discounts_received_count',
+            'profile__discounts_used_count', 'profile__about',
+            'profile__phone', 'profile__email',
+            'profile__website', 'profile__address',
+            'profile__location_coordinates'
+        ).get(username=username)
 
-    # Serialize user profile data
-    user_profile_data = UserProfileSerializer(user).data
+        profile = user.profile
 
-    #######################################################
+    except (User.DoesNotExist, Profile.DoesNotExist):
+        return Response({'detail': 'User or business profile not found'}, status=status.HTTP_404_NOT_FOUND)
 
-     # Retrieve the business types associated with the user's business profile
-    business_profile_types = BusinessProfileType.objects.filter(profile=business_profile)
-    business_types = BusinessType.objects.filter(id__in=business_profile_types.values_list('business_type', flat=True))
+    # Manual serialization for maximum performance
+    profile_data = {
+        'id': profile.id,
+        'business_name': profile.business_name,
+        'banner_url': request.build_absolute_uri(profile.banner_url.url) if profile.banner_url else None,
+        'avatar_url': request.build_absolute_uri(profile.avatar_url.url) if profile.avatar_url else None,
+        'followers_count': profile.followers_count,
+        'followings_count': profile.followings_count,
+        'discounts_received_count': profile.discounts_received_count,
+        'discounts_used_count': profile.discounts_used_count,
+        'about': profile.about,
+        'phone': profile.phone,
+        'email': profile.email,
+        'website': profile.website,
+        'address': profile.address,
+        'location_coordinates': profile.location_coordinates,
+        'linked_profiles': list(profile.linked_profiles.values_list('id', flat=True)[:5]),
+    }
 
-    # Serialize the specified business types
-    business_types_serialized = BusinessTypeSerializer(business_types, many=True).data
+    # Fetch related business types efficiently
+    business_type_tuples = UserBusinessType.objects.select_related('business_type').filter(
+        user=user
+    ).values_list(
+        'business_type__id', 'business_type__name', 'business_type__description'
+    )
+    # business_type_tuples = BusinessType.objects.filter(
+    #     userbusinesstype__user_id=user.id
+    # ).values_list('id', 'name', 'description')
+        
+    # include them in Redis
+    business_types = [
+        {'id': i, 'name': n, 'description': d}
+        for i, n, d in business_type_tuples
+    ] # maybe do not include desc
 
-    # Add business types to the user profile data
-    user_profile_data['business_types'] = business_types_serialized
+    # Efficient follow check (EXISTS query)
+    is_following = Follow.objects.filter(
+        follower=viewer_user,
+        following=user
+    ).exists()
 
-    #######################################################
-    
-    # Get followers count from the Follow model
-    followers_count = Follow.objects.filter(following=business_profile).count()
-    user_profile_data['followers_count'] = followers_count
+    # Final response
+    response_data = {
+        'id': user.id,
+        'username': user.username,
+        'profile': profile_data,
+        'business_types': business_types,
+        'is_following': is_following,
+    }
 
-    #######################################################
-
-    # Get followings count from the Follow model
-    followings_count = Follow.objects.filter(follower=business_profile).count()
-    user_profile_data['followings_count'] = followings_count
-
-    #######################################################
-    
-    # Check if the requester user is following the business profile
-    is_following = Follow.objects.filter(follower=request.user.business_profile, following=business_profile).exists()
-    user_profile_data['is_following'] = is_following
-
-    #######################################################
-
-    # Get average discount percentage
-    discounts = Discount.objects.filter(issuer=business_profile)
-    if discounts.exists():
-        average_discount = discounts.aggregate(Avg('percentage'))['percentage__avg']
-    else:
-        average_discount = 0  # Default value if there are no discounts
-
-    user_profile_data['average_discount_percentage'] = average_discount
-
-    #######################################################
-
-    return Response(user_profile_data, status=status.HTTP_200_OK)
+    return Response(response_data, status=status.HTTP_200_OK)

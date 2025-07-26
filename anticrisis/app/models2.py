@@ -2,6 +2,8 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes.fields import GenericForeignKey
 import uuid
 from datetime import datetime
 import os
@@ -16,19 +18,28 @@ def banner_upload_to(instance, filename):
     ext = os.path.splitext(filename)[1] or '.jpg'
     return f"banners/{username}_banner{ext}"
 
-class BusinessProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='business_profile')
+class Profile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+
     business_name = models.CharField(max_length=255)
-    avatar_picture = models.ImageField(upload_to=avatar_upload_to, null=True, blank=True)
-    banner_picture = models.ImageField(upload_to=banner_upload_to, null=True, blank=True)
+    avatar_url = models.ImageField(upload_to=avatar_upload_to, null=True, blank=True)
+    banner_url = models.ImageField(upload_to=banner_upload_to, null=True, blank=True)
+    
+    # Denormalized counts
     followers_count = models.PositiveIntegerField(default=0)
     followings_count = models.PositiveIntegerField(default=0)
+    discounts_received_count = models.PositiveIntegerField(default=0)
+    discounts_used_count = models.PositiveIntegerField(default=0)
+
+    # Contact & meta info
     about = models.TextField(null=True, blank=True, default='')
-    contact_phone = models.CharField(max_length=15, null=True, blank=True, default='')
-    contact_email = models.EmailField(null=True, blank=True, default='')
+    phone = models.CharField(max_length=15, null=True, blank=True, default='')
+    email = models.EmailField(null=True, blank=True, default='')
     website = models.URLField(null=True, blank=True, default='')
     address = models.TextField(null=True, blank=True, default='')
     location_coordinates = models.CharField(max_length=100, null=True, blank=True, default='')
+
+    # Business network
     linked_profiles = models.ManyToManyField('self', symmetrical=False, blank=True)
 
     class Meta:
@@ -38,19 +49,6 @@ class BusinessProfile(models.Model):
 
     def __str__(self):
         return self.business_name
-    
-@receiver(pre_save, sender=BusinessProfile)
-def delete_old_files(sender, instance, **kwargs):
-    if not instance.pk:
-        return
-
-    old = sender.objects.get(pk=instance.pk)
-
-    if old.avatar_picture and old.avatar_picture != instance.avatar_picture:
-        old.avatar_picture.delete(save=False)
-
-    if old.banner_picture and old.banner_picture != instance.banner_picture:
-        old.banner_picture.delete(save=False)
 
 class BusinessType(models.Model):
     name = models.CharField(max_length=100, unique=True, db_index=True)
@@ -80,19 +78,22 @@ class ClosureTable(models.Model):
             models.Index(fields=['ancestor', 'descendant']),
         ]
 
-class BusinessProfileType(models.Model):
-    profile = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE)
+class UserBusinessType(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     business_type = models.ForeignKey(BusinessType, on_delete=models.CASCADE)
 
     class Meta:
-        unique_together = ('profile', 'business_type')
+        unique_together = ('user', 'business_type')
         indexes = [
-            models.Index(fields=['profile', 'business_type']),
+            models.Index(fields=['user', 'business_type']),
         ]
         
+    def __str__(self):
+        return f"{self.user.username} - {self.business_type.name}"
+    
 class Discount(models.Model):
-    issuer = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name='issued_discounts')
-    recipient = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name='received_discounts')
+    issuer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='issued_discounts')
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_discounts')
     percentage = models.DecimalField(max_digits=5, decimal_places=2)
     redeem_limit = models.DecimalField(max_digits=10, decimal_places=2)
     redeem_used = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
@@ -104,9 +105,12 @@ class Discount(models.Model):
             models.Index(fields=['created_at']),
         ]
 
+    def __str__(self):
+        return f'Discount {self.percentage}% from {self.issuer.username} to {self.recipient.username}'
+
 class Follow(models.Model):
-    follower = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name='following')
-    following = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name='followers')
+    follower = models.ForeignKey(User, on_delete=models.CASCADE, related_name='following')
+    following = models.ForeignKey(User, on_delete=models.CASCADE, related_name='followers')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -116,20 +120,55 @@ class Follow(models.Model):
             models.Index(fields=['created_at']),
         ]
 
+    def __str__(self):
+        return f'{self.follower.username} follows {self.following.username}'
+
 class Notification(models.Model):
-    business_profile = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name='notifications')
+    class NotificationType(models.TextChoices):
+        SYSTEM = 'system', 'System'
+        POST = 'post', 'Post'
+        FOLLOW = 'follow', 'Follow'
+        BUSINESS = 'business', 'Business'
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+        db_index=True
+    )
+
     message = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    is_read = models.BooleanField(default=False)
+    type = models.CharField(
+        max_length=20,
+        choices=NotificationType.choices,
+        db_index=True
+    )
+
+    is_read = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    # Optional generic relation to source object (Post, Follow, etc.)
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_index=True
+    )
+    object_id = models.PositiveBigIntegerField(null=True, blank=True, db_index=True)
+    content_object = GenericForeignKey('content_type', 'object_id')
 
     class Meta:
         indexes = [
-            models.Index(fields=['business_profile', 'is_read']),
-            models.Index(fields=['created_at']),
+            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['type']),
+            models.Index(fields=['content_type', 'object_id']),
         ]
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f'Notification for {self.business_profile.business_name}'
+        return f'Notification to {self.user.username}: {self.message[:40]}'
 
 
 
@@ -141,8 +180,9 @@ def post_image_upload_to(instance, filename):
     return f"posts/{unique_id}{ext}"
 
 class Post(models.Model):
-    business_profile = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name='posts')
-    description = models.TextField()
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='posts')
+
+    description = models.TextField(null=True, blank=True, default='')
     post_image = models.ImageField(upload_to=post_image_upload_to, null=True, blank=True)
     likes_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -151,7 +191,8 @@ class Post(models.Model):
         indexes = [
             models.Index(fields=['created_at']),
             models.Index(fields=['likes_count']),
+            models.Index(fields=['user']),  # Optional: speeds up filtering by user
         ]
 
     def __str__(self):
-        return f'Post by {self.business_profile.business_name}'
+        return f'Post by {self.user.username}'
